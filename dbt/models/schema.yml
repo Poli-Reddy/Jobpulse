@@ -1,0 +1,109 @@
+version: 2
+
+models:
+  - name: stg_jobs
+    columns:
+      - name: job_key
+        tests: [not_null, unique]
+      - name: source
+        tests: [not_null]
+      - name: source_job_id
+        tests: [not_null]
+      - name: status
+        tests:
+          - accepted_values:
+              values: ["NEW", "ACTIVE", "UPDATED", "CLOSED", "REACTIVATED"]
+  - name: stg_companies
+    columns:
+      - name: company_key
+        tests: [not_null, unique]
+      - name: company_name
+        tests: [not_null]
+  - name: stg_locations
+    columns:
+      - name: location_key
+        tests: [not_null, unique]
+  - name: stg_skills
+    columns:
+      - name: skill_key
+        tests: [not_null, unique]
+      - name: skill_name
+        tests: [not_null, unique]
+  - name: stg_job_skills
+    columns:
+      - name: job_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_jobs')
+              field: job_key
+      - name: skill_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_skill')
+              field: skill_key
+  - name: dim_company
+    columns:
+      - name: company_key
+        tests: [not_null, unique]
+  - name: dim_location
+    columns:
+      - name: location_key
+        tests: [not_null, unique]
+  - name: dim_skill
+    columns:
+      - name: skill_key
+        tests: [not_null, unique]
+  - name: dim_date
+    columns:
+      - name: date_key
+        tests: [not_null, unique]
+      - name: date_day
+        tests: [not_null, unique]
+  - name: fact_job
+    columns:
+      - name: job_key
+        tests: [not_null, unique]
+      - name: company_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_company')
+              field: company_key
+      - name: location_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_location')
+              field: location_key
+      - name: status
+        tests:
+          - accepted_values:
+              values: ["NEW", "ACTIVE", "UPDATED", "CLOSED", "REACTIVATED"]
+  - name: fact_job_skill
+    columns:
+      - name: job_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('fact_job')
+              field: job_key
+      - name: skill_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_skill')
+              field: skill_key
+  - name: skill_demand
+    columns:
+      - name: skill
+        tests: [not_null, unique]
+  - name: company_hiring
+    columns:
+      - name: company_name
+        tests: [not_null, unique]
+  - name: location_demand
+    columns:
+      - name: location
+        tests: [not_null, unique]

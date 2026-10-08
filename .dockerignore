@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.env
+.env.*
+!.env.example
+dbt/target
+dbt/logs
+data/raw
+*.pyc

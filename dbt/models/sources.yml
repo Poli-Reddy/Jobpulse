@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: jobpulse_staging
+    schema: staging
+    tables:
+      - name: stg_jobs
+      - name: stg_companies
+      - name: stg_locations
+      - name: stg_skills
+      - name: stg_job_skills

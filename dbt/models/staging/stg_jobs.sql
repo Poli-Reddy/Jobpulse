@@ -1,0 +1,20 @@
+select
+    id as job_key,
+    source,
+    source_job_id,
+    title,
+    company_id,
+    location_id,
+    employment_type,
+    level,
+    salary_min,
+    salary_max,
+    salary_currency,
+    salary_period,
+    published_at,
+    first_seen_at,
+    last_seen_at,
+    updated_at,
+    status,
+    job_url
+from {{ source('jobpulse_staging', 'stg_jobs') }}

@@ -1,0 +1,7 @@
+# Optional extension point for controlled skill taxonomy.
+# The current application detects the built-in vocabulary in app/normalization.py.
+cloud: [aws, azure, gcp]
+data_engineering: [airflow, dbt, spark, kafka]
+databases: [postgresql, mysql, mongodb, snowflake]
+programming: [python, java, javascript, typescript]
+bi: [power bi, tableau]

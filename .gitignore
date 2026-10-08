@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+data/raw/
+dbt/target/
+dbt/logs/
+dbt/.user.yml
+*.log
+terraform/.terraform/
+terraform/*.tfstate*
+terraform/*.tfvars
+.DS_Store
