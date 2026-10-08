@@ -38,7 +38,7 @@ jobs:
           PGPASSWORD: jobpulse-test
         run: createdb --host localhost --username jobpulse jobpulse_test
       - name: Apply database migrations
-        run: python scripts/init_db.py
+        run: python -m scripts.run_migrations
       - name: Run tests
         run: pytest -q
       - name: Validate dbt project
