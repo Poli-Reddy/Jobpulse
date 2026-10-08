@@ -20,6 +20,8 @@ def test_required_routes_are_exposed():
         "/analytics/companies",
         "/analytics/locations",
         "/analytics/salary",
+        "/analytics/jobs/trend",
+        "/analytics/overview",
         "/pipeline/status",
         "/sources/status",
     }
@@ -41,6 +43,13 @@ def test_health_endpoint_exists():
     if response.status_code == 200:
         assert response.json()["status"] == "ok"
         assert "database_url" not in response.text.lower()
+
+
+def test_jobs_reject_invalid_pagination_and_filters():
+    client = TestClient(app)
+    assert client.get("/jobs?page=0").status_code == 422
+    assert client.get("/jobs?page_size=101").status_code == 422
+    assert client.get("/jobs?status=UNKNOWN").status_code == 422
 
 
 def test_database_errors_are_structured_and_do_not_leak_details():

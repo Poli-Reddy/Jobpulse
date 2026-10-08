@@ -1,6 +1,6 @@
 # JobPulse — Automated hourly job-market intelligence
 
-JobPulse is a Python data pipeline and API that ingests public job listings, validates and normalizes them, preserves source payloads and job history in PostgreSQL, builds dbt analytics, and serves the results through FastAPI. It is scheduled hourly, not real-time.
+JobPulse is a React and FastAPI application backed by a Python data pipeline. It ingests public job listings, validates and normalizes them, preserves source payloads and job history in PostgreSQL, builds dbt analytics, and serves live results to the dashboard. Ingestion is scheduled hourly, not real-time.
 
 ## Architecture and data flow
 
@@ -17,6 +17,9 @@ Arbeitnow API ─────┘                                  │
                                                               │
                                                               v
                                                         FastAPI endpoints
+                                                              │
+                                                              v
+                                                    React dashboard (Vite)
 ```
 
 ## PostgreSQL schemas
@@ -49,8 +52,8 @@ Missing source IDs receive a deterministic ID: the normalized source URL where a
 Requirements: Docker Desktop with Compose v2. The checked-in example uses local-only placeholder credentials; replace `CHANGE_ME_LOCAL` before using pgAdmin beyond a private development machine.
 
 ```powershell
-Copy-Item .env.example .env
-# Set local POSTGRES_PASSWORD, PGADMIN_PASSWORD, and DATABASE_URL in .env.
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+# Ensure POSTGRES_PASSWORD and PGADMIN_PASSWORD are local-only values.
 docker compose up --build -d
 ```
 
@@ -79,16 +82,38 @@ Stop the services with `docker compose down`. The named PostgreSQL volume is ret
 
 `.env.example` contains placeholders and local-development defaults only. The production connection string is provided to ingestion as the `DATABASE_URL` GitHub Actions secret; it is not committed or returned by the API. The dbt runner parses the connection URL in-process and passes its connection components to dbt without printing the password.
 
-The API uses `CORS_ORIGINS` as a comma-separated allowlist. Set the production frontend origin explicitly if one is later added; this repository currently contains no frontend application.
+The API uses `CORS_ORIGINS` as a comma-separated allowlist. The local frontend
+uses `http://localhost:3000`; set the production frontend origin explicitly
+when deploying the dashboard.
+
+## Frontend
+
+The React/Vite dashboard is in `frontend/`. It reads data only through the
+FastAPI API; it never connects directly to PostgreSQL. With the backend running
+on port `8000`:
+
+```powershell
+cd frontend
+Copy-Item .env.example .env
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The frontend includes overview, job search and
+details, skills, companies, locations, salary, and pipeline health pages.
+`VITE_API_URL` configures the API address. Build the frontend with
+`npm run build`.
 
 ## API
 
 - `GET /health`
-- `GET /jobs?page=1&page_size=50&title=&company=&location=&skill=&source=&status=&remote_type=`
+- `GET /jobs?page=1&page_size=50&search=&company=&location=&skill=&source=&status=&remote_type=`
 - `GET /jobs/{job_id}`
 - `GET /companies`, `GET /skills`, `GET /locations` (paginated)
 - `GET /analytics/skills`
 - `GET /analytics/skills/growth`
+- `GET /analytics/jobs/trend`
+- `GET /analytics/overview`
 - `GET /analytics/companies`
 - `GET /analytics/locations`
 - `GET /analytics/salary` (actual reported salary values only, grouped by currency/period)

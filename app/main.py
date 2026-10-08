@@ -15,7 +15,6 @@ from app.models import (
     PipelineRun,
     SourceStatus,
     StgCompany,
-    StgJob,
     StgLocation,
 )
 
@@ -76,6 +75,7 @@ def jobs(
     page_size: int = Query(50, ge=1, le=100),
     limit: int | None = Query(None, ge=1, le=100),
     source: str | None = Query(None, min_length=1, max_length=50),
+    search: str | None = Query(None, min_length=1, max_length=200),
     title: str | None = Query(None, min_length=1, max_length=200),
     company: str | None = Query(None, min_length=1, max_length=200),
     location: str | None = Query(None, min_length=1, max_length=200),
@@ -87,6 +87,7 @@ def jobs(
     size = limit or page_size
     params = {
         "source": source,
+        "search": f"%{search}%" if search else None,
         "title": f"%{title}%" if title else None,
         "company": f"%{company}%" if company else None,
         "location": f"%{location}%" if location else None,
@@ -99,6 +100,9 @@ def jobs(
     }
     filters = """
         WHERE (:source IS NULL OR j.source = :source)
+          AND (:search IS NULL OR lower(j.title) LIKE lower(:search)
+                              OR lower(j.description) LIKE lower(:search)
+                              OR lower(c.name) LIKE lower(:search))
           AND (:title IS NULL OR lower(j.title) LIKE lower(:title))
           AND (:company IS NULL OR lower(c.name) LIKE lower(:company))
           AND (:location IS NULL OR lower(l.normalized_location) LIKE lower(:location)
@@ -125,7 +129,7 @@ def jobs(
             SELECT j.id, j.source, j.source_job_id, j.title, c.name AS company,
                    l.raw_location AS location, l.normalized_location, l.remote,
                    j.job_url, j.published_at, j.salary_min, j.salary_max,
-                   j.salary_currency, j.status
+                   j.salary_currency, j.first_seen_at, j.status
             FROM staging.stg_jobs j
             JOIN staging.stg_companies c ON c.id=j.company_id
             JOIN staging.stg_locations l ON l.id=j.location_id
@@ -145,27 +149,32 @@ def jobs(
 
 @app.get("/jobs/{job_id}")
 def job_detail(job_id: int, db: Session = Depends(get_db)):
-    item = db.get(StgJob, job_id)
-    if item is None:
+    row = db.execute(
+        text(
+            """
+            SELECT j.id, j.source, j.source_job_id, j.title, j.description, j.status,
+                   j.job_url, j.salary_min, j.salary_max, j.salary_currency,
+                   j.salary_period, j.employment_type, j.level, j.published_at,
+                   j.first_seen_at, j.last_seen_at, j.updated_at,
+                   c.name AS company, c.domain AS company_domain,
+                   l.raw_location AS location, l.normalized_location,
+                   l.remote,
+                   coalesce(array_agg(s.name ORDER BY s.name)
+                       FILTER (WHERE s.name IS NOT NULL), ARRAY[]::varchar[]) AS skills
+            FROM staging.stg_jobs j
+            JOIN staging.stg_companies c ON c.id = j.company_id
+            JOIN staging.stg_locations l ON l.id = j.location_id
+            LEFT JOIN staging.stg_job_skills js ON js.job_id = j.id
+            LEFT JOIN staging.stg_skills s ON s.id = js.skill_id
+            WHERE j.id = :job_id
+            GROUP BY j.id, c.id, l.id
+            """
+        ),
+        {"job_id": job_id},
+    ).mappings().first()
+    if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return {
-        "id": item.id,
-        "source": item.source,
-        "source_job_id": item.source_job_id,
-        "title": item.title,
-        "description": item.description,
-        "status": item.status,
-        "job_url": item.job_url,
-        "company_id": item.company_id,
-        "location_id": item.location_id,
-        "salary_min": item.salary_min,
-        "salary_max": item.salary_max,
-        "salary_currency": item.salary_currency,
-        "published_at": item.published_at,
-        "first_seen_at": item.first_seen_at,
-        "last_seen_at": item.last_seen_at,
-        "updated_at": item.updated_at,
-    }
+    return dict(row)
 
 
 @app.get("/companies")
@@ -175,15 +184,34 @@ def companies(
     db: Session = Depends(get_db),
 ):
     total = db.query(StgCompany).count()
-    rows = (
-        db.query(StgCompany.id, StgCompany.name, StgCompany.domain)
-        .order_by(StgCompany.name)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
+    rows = db.execute(
+        text(
+            """
+            SELECT c.id, c.name, c.domain,
+                   count(DISTINCT j.id) FILTER (WHERE j.status <> 'CLOSED') AS active_jobs,
+                   count(DISTINCT j.id) FILTER (WHERE j.status = 'NEW') AS new_jobs,
+                   count(DISTINCT j.location_id) AS location_count,
+                   ARRAY(
+                       SELECT s.name
+                       FROM staging.stg_jobs sj
+                       JOIN staging.stg_job_skills js ON js.job_id = sj.id
+                       JOIN staging.stg_skills s ON s.id = js.skill_id
+                       WHERE sj.company_id = c.id AND sj.status <> 'CLOSED'
+                       GROUP BY s.name
+                       ORDER BY count(*) DESC, s.name
+                       LIMIT 3
+                   ) AS top_skills
+            FROM staging.stg_companies c
+            LEFT JOIN staging.stg_jobs j ON j.company_id = c.id
+            GROUP BY c.id
+            ORDER BY c.name
+            LIMIT :limit OFFSET :offset
+            """
+        ),
+        {"limit": page_size, "offset": (page - 1) * page_size},
+    ).mappings()
     return {
-        "items": [{"id": row.id, "name": row.name, "domain": row.domain} for row in rows],
+        "items": [dict(row) for row in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -204,9 +232,10 @@ def skills(
     ).scalar_one()
     rows = db.execute(
         text(
-            "SELECT DISTINCT s.id, s.name, s.category FROM staging.stg_skills s "
+            "SELECT s.id, s.name, s.category, count(DISTINCT js.job_id) AS job_count "
+            "FROM staging.stg_skills s "
             "JOIN staging.stg_job_skills js ON js.skill_id=s.id "
-            "ORDER BY s.name LIMIT :limit OFFSET :offset"
+            "GROUP BY s.id ORDER BY job_count DESC, s.name LIMIT :limit OFFSET :offset"
         ),
         {"limit": page_size, "offset": (page - 1) * page_size},
     )
@@ -225,23 +254,32 @@ def locations(
     db: Session = Depends(get_db),
 ):
     total = db.query(StgLocation).count()
-    rows = (
-        db.query(StgLocation)
-        .order_by(StgLocation.normalized_location)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
+    rows = db.execute(
+        text(
+            """
+            SELECT l.id, l.normalized_location AS name, l.raw_location, l.remote,
+                   count(DISTINCT j.id) AS job_count,
+                   ARRAY(
+                       SELECT s.name
+                       FROM staging.stg_jobs sj
+                       JOIN staging.stg_job_skills js ON js.job_id = sj.id
+                       JOIN staging.stg_skills s ON s.id = js.skill_id
+                       WHERE sj.location_id = l.id
+                       GROUP BY s.name
+                       ORDER BY count(*) DESC, s.name
+                       LIMIT 3
+                   ) AS top_skills
+            FROM staging.stg_locations l
+            LEFT JOIN staging.stg_jobs j ON j.location_id = l.id
+            GROUP BY l.id
+            ORDER BY l.normalized_location
+            LIMIT :limit OFFSET :offset
+            """
+        ),
+        {"limit": page_size, "offset": (page - 1) * page_size},
+    ).mappings()
     return {
-        "items": [
-            {
-                "id": row.id,
-                "name": row.normalized_location,
-                "raw_location": row.raw_location,
-                "remote": row.remote,
-            }
-            for row in rows
-        ],
+        "items": [dict(row) for row in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -258,6 +296,44 @@ def analytics_skills(limit: int = Query(20, ge=1, le=100), db: Session = Depends
         {"limit": limit},
     )
     return [dict(row._mapping) for row in rows]
+
+
+@app.get("/analytics/jobs/trend")
+def analytics_job_trend(limit: int = Query(90, ge=1, le=366), db: Session = Depends(get_db)):
+    rows = db.execute(
+        text(
+            "SELECT day, jobs_first_seen FROM analytics.daily_job_trend "
+            "ORDER BY day DESC LIMIT :limit"
+        ),
+        {"limit": limit},
+    )
+    return [dict(row._mapping) for row in rows][::-1]
+
+
+@app.get("/analytics/overview")
+def analytics_overview(db: Session = Depends(get_db)):
+    counts = db.execute(
+        text(
+            """
+            SELECT count(*) FILTER (WHERE status <> 'CLOSED') AS active_jobs,
+                   count(*) FILTER (WHERE status = 'NEW') AS new_jobs,
+                   count(DISTINCT company_id) FILTER (WHERE status <> 'CLOSED')
+                       AS companies_hiring
+            FROM staging.stg_jobs
+            """
+        )
+    ).mappings().one()
+    skills_count = db.execute(text("SELECT count(*) FROM staging.stg_skills")).scalar_one()
+    sources_count = db.execute(
+        text("SELECT count(*) FROM monitoring.source_status WHERE status = 'SUCCESS'")
+    ).scalar_one()
+    latest_run = db.query(PipelineRun).order_by(PipelineRun.started_at.desc()).first()
+    return {
+        **dict(counts),
+        "tracked_skills": skills_count,
+        "sources_succeeded": sources_count,
+        "last_pipeline_run": latest_run.started_at if latest_run else None,
+    }
 
 
 @app.get("/analytics/skills/growth")
