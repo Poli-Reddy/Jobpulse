@@ -28,4 +28,4 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Ingest and build analytics
-        run: python scripts/run_ingestion.py
+        run: python -m scripts.run_ingestion
