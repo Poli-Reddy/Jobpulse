@@ -12,6 +12,11 @@ Deployment is deliberately deferred. The project has been verified locally with 
 6. Deploy a frontend only after one is added to this repository.
 7. Enable the best-effort hourly schedule and monitor data freshness.
 
+Render's Python runtime is pinned by the repository-root `.python-version` file
+to Python 3.12.8. If a Render service-level `PYTHON_VERSION` environment
+variable is set, keep it aligned with this file; Render uses that variable in
+preference to the repository pin.
+
 No production service, database, or repository secret has been configured by this local project.
 
 ## Operational constraints
